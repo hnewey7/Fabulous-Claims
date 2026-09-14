@@ -141,6 +141,7 @@
     holographic_banners: true  # Toggle 3D holographic banners above anchor blocks.
     sub_leasing: true          # Toggle claim sub-leasing & plot renting.
     particle_themes: true      # Toggle customizable visualizer particle themes.
+    block_theme: false         # Toggle for using blocks to visualise claim (note: particle themes must be set to false).
     claim_bank: true           # Toggle shared claim economy bank storage.
     analytics: true            # Toggle visitor history logs & incident analytics.
     claim_block_cleanup: false # Toggle for cleaning up claim blocks after placing.

@@ -8,13 +8,22 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.PlayerJoinEvent;
 import org.bukkit.event.player.PlayerQuitEvent;
 import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.ChunkSnapshot;
+import org.bukkit.Material;
+import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.block.data.BlockData;
 
 import java.util.*;
 
 public class Visualization implements Listener {
+    private record BlockKey(Location loc, BlockData data) {}
+
     private static final Set<UUID> enabled = new HashSet<>();
     private static final Map<UUID, String> themes = new HashMap<>();
+    private static final Map<UUID, Set<BlockKey>> shown = new HashMap<>();
     private static BukkitRunnable task;
+    private static boolean block_theme;
 
     public static void init(ClaimPlugin plugin) {
         enabled.clear();
@@ -27,6 +36,10 @@ public class Visualization implements Listener {
         if (!enabled.isEmpty()) {
             start();
         }
+    }
+
+    private static boolean isBlockThemeActive(ClaimPlugin plugin) {
+        return !plugin.feature("particle_themes", true) && plugin.feature("block_theme", false);
     }
 
     public static void setTheme(UUID uuid, String theme) {
@@ -52,6 +65,7 @@ public class Visualization implements Listener {
         if (enabled.contains(uuid)) {
             enabled.remove(uuid);
             newState = false;
+            revertAll(p);
             p.sendMessage("§eClaim visualization disabled.");
             stopIfNone();
         } else {
@@ -80,10 +94,14 @@ public class Visualization implements Listener {
 
                     for (Claim c : cm.getClaims()) {
                         if (c.getWorldName().equals(pLoc.getWorld().getName())) {
-                            double distSq = Math.pow(c.getCenterX() - pLoc.getX(), 2)
-                                    + Math.pow(c.getCenterZ() - pLoc.getZ(), 2);
-                            if (distSq <= 10000.0) { // 100 * 100 blocks
-                                render(player, c);
+                            if (c.isInside(pLoc)) {
+                                if (!isBlockThemeActive(ClaimPlugin.getInstance())) {
+                                    render_particle(player, c);
+                                } else {
+                                    render_block(player, c);
+                                }   
+                            } else {
+                                revertAll(player);
                             }
                         }
                     }
@@ -145,7 +163,7 @@ public class Visualization implements Listener {
         }
     }
 
-    private static void render(Player p, Claim c) {
+    private static void render_particle(Player p, Claim c) {
         Particle part = getParticleForTheme(getTheme(p.getUniqueId()));
         int halfX = c.getSizeX() / 2, halfZ = c.getSizeZ() / 2;
         int cx = c.getCenterX(), cz = c.getCenterZ();
@@ -179,4 +197,91 @@ public class Visualization implements Listener {
             p.spawnParticle(part, cx + halfX + 0.5, targetY, z + 0.5, 1, 0, 0, 0, 0);
         }
     }
+
+    private static void render_block(Player p, Claim c) {
+        // Get world
+        World world = p.getWorld();
+
+        // Get half size and center of claim
+        int halfX = c.getSizeX() / 2;
+        int halfZ = c.getSizeZ() / 2;
+        int cx = c.getCenterX();
+        int cz = c.getCenterZ();
+
+        // Calculate corners
+        int[] x_corners = {
+            cx - halfX,
+            cx - halfX, 
+            cx + halfX, 
+            cx + halfX
+        };
+        int[] z_corners = {
+            cz - halfZ,
+            cz + halfZ,
+            cz - halfZ,
+            cz + halfZ
+        };
+
+        // Set air transitions around player to marking block
+        int playerY = p.getLocation().getBlockY();
+        for (int i = 0; i < 4; i++) {
+            // Get air transitions 5 blocks above and below player.
+            List<Integer> transitions = airTransitions(world, x_corners[i], z_corners[i], playerY - 5, playerY + 5);
+            for (int transY : transitions) {
+                // Get block at transition
+                Block block = world.getBlockAt(x_corners[i], transY, z_corners[i]);
+
+                // Get data for caching
+                UUID pID = p.getUniqueId();
+                Location loc = block.getLocation();
+                BlockData data = block.getBlockData();
+                BlockKey new_block = new BlockKey(loc, data);
+
+                // Update hashmap
+                if (shown.containsKey(pID)) {
+                    shown.get(pID).add(new_block);
+                } else {
+                    Set<BlockKey> set = new HashSet<BlockKey>();
+                    set.add(new_block);
+                    shown.put(pID, set);
+                }
+
+                // Send block change to player.
+                p.sendBlockChange(loc, Material.GOLD_BLOCK.createBlockData());
+            }
+        }
+    }
+
+    private static List<Integer> airTransitions(World world, int x, int z, int minHeight, int maxHeight) {
+        ChunkSnapshot snapshot = world.getChunkAt(x >> 4, z >> 4).getChunkSnapshot();
+        return airTransitions(snapshot, x & 15, z & 15, world.getMinHeight(), maxHeight);
+    }
+
+    private static List<Integer> airTransitions(ChunkSnapshot snapshot, int lx, int lz, int minHeight, int maxHeight) {
+        List<Integer> result = new ArrayList<>();
+        Material below = snapshot.getBlockType(lx, minHeight, lz);
+
+        for (int y = minHeight; y < maxHeight; y++) {
+            Material here = snapshot.getBlockType(lx, y, lz);
+            if (below.isSolid() && here.isAir()) {
+                result.add(y - 1);
+            }
+            below = here;
+        }
+        return result;
+    }
+
+    private static void revert(Player p, BlockKey block) {
+        // Send original block data back to player.
+        p.sendBlockChange(block.loc(), block.data());
+    }
+
+    private static void revertAll(Player p) {
+        // Get all original blocks
+        Set<BlockKey> set = shown.get(p.getUniqueId());
+        for (BlockKey b : set) {
+            revert(p, b);
+        }
+    }
+
 }
