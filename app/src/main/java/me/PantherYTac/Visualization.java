@@ -88,6 +88,35 @@ public class Visualization implements Listener {
         enabled.remove(e.getPlayer().getUniqueId());
     }
 
+    @EventHandler 
+    private void onBlockInteract(PlayerInteractEvent e) {
+        // Get player and player id
+        Player player = e.getPlayer();
+        UUID player_id = player.getUniqueId();
+
+        // Get block interacted with and create block key
+        Block block = e.getClickedBlock();
+        if (block == null) {
+            return;
+        }
+        BlockKey interacted = new BlockKey(block.getLocation(), block.getBlockData());
+
+        // Get existing blocks for player
+        Set<BlockKey> existing_set = existing.get(player_id);
+        if (existing_set == null) {
+            return;
+        }
+
+        // Check if interacting with a modified block
+        if (existing_set.contains(interacted)) {
+            // Send back original data
+            player.sendBlockChange(interacted.loc(), interacted.data());
+
+            // Start a delayed task to remove block data from existing
+            Bukkit.getScheduler().runTaskLater(ClaimPlugin.getInstance(), new RemoveExistingBlockTask(player_id, interacted), 60L);
+        }
+    }
+
     private static void createTasks() {
         // Task for sending block updates
         sendBlockUpdatesTask = createSendBlockUpdatesTask();
@@ -254,35 +283,6 @@ public class Visualization implements Listener {
                 // Clean up pending updates
                 updates.remove(this.player_id);
             }
-        }
-    }
-
-    @EventHandler 
-    private void onBlockInteract(PlayerInteractEvent e) {
-        // Get player and player id
-        Player player = e.getPlayer();
-        UUID player_id = player.getUniqueId();
-
-        // Get block interacted with and create block key
-        Block block = e.getClickedBlock();
-        if (block == null) {
-            return;
-        }
-        BlockKey interacted = new BlockKey(block.getLocation(), block.getBlockData());
-
-        // Get existing blocks for player
-        Set<BlockKey> existing_set = existing.get(player_id);
-        if (existing_set == null) {
-            return;
-        }
-
-        // Check if interacting with a modified block
-        if (existing_set.contains(interacted)) {
-            // Send back original data
-            player.sendBlockChange(interacted.loc(), interacted.data());
-
-            // Start a delayed task to remove block data from existing
-            Bukkit.getScheduler().runTaskLater(ClaimPlugin.getInstance(), new RemoveExistingBlockTask(player_id, interacted), 60L);
         }
     }
 
