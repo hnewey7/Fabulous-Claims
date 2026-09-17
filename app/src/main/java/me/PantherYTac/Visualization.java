@@ -1,62 +1,49 @@
 package me.PantherYTac;
 
+import org.bukkit.Bukkit;
 import org.bukkit.Location;
-import org.bukkit.Particle;
-import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.event.player.PlayerQuitEvent;
-import org.bukkit.scheduler.BukkitRunnable;
-import org.bukkit.ChunkSnapshot;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.ChunkSnapshot;
+import org.bukkit.entity.Player;
 import org.bukkit.block.Block;
-import org.bukkit.block.data.BlockData;
+import org.bukkit.block.data.BlockData; 
+import org.bukkit.scheduler.BukkitRunnable;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.player.PlayerInteractEvent;
+import org.bukkit.event.player.PlayerJoinEvent;
+import org.bukkit.event.player.PlayerQuitEvent;
 
 import java.util.*;
 
 public class Visualization implements Listener {
     private record BlockKey(Location loc, BlockData data) {}
 
-    private static final Set<UUID> enabled = new HashSet<>();
-    private static final Map<UUID, String> themes = new HashMap<>();
-    private static final Map<UUID, Set<BlockKey>> shown = new HashMap<>();
-    private static BukkitRunnable task;
-    private static boolean block_theme;
+    private static Set<UUID> enabled = new HashSet<>();
+    private static Map<UUID, Set<BlockKey>> updates = new HashMap<>();
+    private static Map<UUID, Set<BlockKey>> existing = new HashMap<>();
+
+    private static Object mutex = new Object();
+
+    private static BukkitRunnable sendBlockUpdatesTask;
+    private static BukkitRunnable checkPlayerLocationTask;
 
     public static void init(ClaimPlugin plugin) {
         enabled.clear();
-        themes.clear();
+        updates.clear();
+        existing.clear();
+        // Check online players and add to enabled
         for (Player p : plugin.getServer().getOnlinePlayers()) {
             if (plugin.getManager().isVisualizationEnabled(p.getUniqueId())) {
                 enabled.add(p.getUniqueId());
             }
         }
-        if (!enabled.isEmpty()) {
-            start();
-        }
-    }
-
-    private static boolean isBlockThemeActive(ClaimPlugin plugin) {
-        return !plugin.feature("particle_themes", true) && plugin.feature("block_theme", false);
-    }
-
-    public static void setTheme(UUID uuid, String theme) {
-        themes.put(uuid, theme.toUpperCase(Locale.ROOT));
-    }
-
-    public static String getTheme(UUID uuid) {
-        return themes.getOrDefault(uuid, "DEFAULT");
-    }
-
-    public static void shutdown() {
-        if (task != null) {
-            task.cancel();
-            task = null;
-        }
-        enabled.clear();
-        themes.clear();
+        // Create tasks
+        createTasks();
+        // Start tasks
+        sendBlockUpdatesTask.runTaskTimer(plugin, 0L, 20L);
+        checkPlayerLocationTask.runTaskTimer(plugin, 0L, 20L);
     }
 
     public static void toggle(Player p) {
@@ -65,57 +52,26 @@ public class Visualization implements Listener {
         if (enabled.contains(uuid)) {
             enabled.remove(uuid);
             newState = false;
-            revertAll(p);
+            Bukkit.getScheduler().runTask(ClaimPlugin.getInstance(), new RevertAllBlocksTask(uuid));
             p.sendMessage("§eClaim visualization disabled.");
-            stopIfNone();
         } else {
             enabled.add(uuid);
             newState = true;
-            p.sendMessage("§aClaim visualization enabled (" + getTheme(uuid) + " theme).");
-            start();
+            p.sendMessage("§aClaim visualization enabled.");
         }
         ClaimPlugin.getInstance().getManager().setVisualizationEnabled(uuid, newState);
     }
 
-    private static void start() {
-        if (task != null) return;
-        task = new BukkitRunnable() {
-            @Override
-            public void run() {
-                for (UUID id : new HashSet<>(enabled)) {
-                    Player player = ClaimPlugin.getInstance().getServer().getPlayer(id);
-                    if (player == null) {
-                        enabled.remove(id);
-                        continue;
-                    }
-                    var cm = ClaimPlugin.getInstance().getManager();
-                    Location pLoc = player.getLocation();
-                    if (pLoc.getWorld() == null) continue;
-
-                    for (Claim c : cm.getClaims()) {
-                        if (c.getWorldName().equals(pLoc.getWorld().getName())) {
-                            if (c.isInside(pLoc)) {
-                                if (!isBlockThemeActive(ClaimPlugin.getInstance())) {
-                                    render_particle(player, c);
-                                } else {
-                                    render_block(player, c);
-                                }   
-                            } else {
-                                revertAll(player);
-                            }
-                        }
-                    }
-                }
-            }
-        };
-        task.runTaskTimer(ClaimPlugin.getInstance(), 0L, 20L);
-    }
-
-    private static void stopIfNone() {
-        if (enabled.isEmpty() && task != null) {
-            task.cancel();
-            task = null;
+    public static void shutdown() {
+        if (sendBlockUpdatesTask != null) {
+            sendBlockUpdatesTask.cancel();
+            sendBlockUpdatesTask = null;
         }
+        if (checkPlayerLocationTask != null) {
+            checkPlayerLocationTask.cancel();
+            checkPlayerLocationTask = null;
+        }
+        enabled.clear();
     }
 
     @EventHandler
@@ -124,164 +80,310 @@ public class Visualization implements Listener {
         boolean isEnabled = ClaimPlugin.getInstance().getManager().isVisualizationEnabled(p.getUniqueId());
         if (isEnabled) {
             enabled.add(p.getUniqueId());
-            start();
         }
     }
 
     @EventHandler
     public void onPlayerQuit(PlayerQuitEvent e) {
         enabled.remove(e.getPlayer().getUniqueId());
-        themes.remove(e.getPlayer().getUniqueId());
-        stopIfNone();
     }
 
-    private static Particle getParticleForTheme(String theme) {
-        switch (theme.toUpperCase(Locale.ROOT)) {
-            case "CYAN":
-                try { return Particle.valueOf("SOUL_FIRE_FLAME"); } catch (Exception e) { return Particle.FLAME; }
-            case "ENCHANTMENT":
-                try { return Particle.valueOf("ENCHANTMENT_TABLE"); } catch (Exception e) { return Particle.CRIT; }
-            case "HEART":
-                return Particle.HEART;
-            case "PORTAL":
-                return Particle.PORTAL;
-            case "DEFAULT":
-            default:
-                return getHappyVillagerParticle();
+    private static void createTasks() {
+        // Task for sending block updates
+        sendBlockUpdatesTask = createSendBlockUpdatesTask();
+        // Task for checking player location
+        checkPlayerLocationTask = createCheckPlayerLocationTask();
+    }
+
+    private static BukkitRunnable createSendBlockUpdatesTask() {
+        return new BukkitRunnable() {
+            @Override
+            public void run() {
+                synchronized (mutex) {
+                    if (updates.isEmpty()) {
+                        return;
+                    }
+
+                    for (Map.Entry<UUID, Set<BlockKey>> entry : new HashMap<>(updates).entrySet()) {
+                        UUID player_id = entry.getKey();
+                        Set<BlockKey> update_set = entry.getValue();
+
+                        // Get the player
+                        Player player = Bukkit.getPlayer(player_id);
+                        if (player == null) {
+                            continue;
+                        }
+
+                        // Send each update to the player
+                        for (BlockKey update : update_set) {
+                            player.sendBlockChange(update.loc(), update.data());
+                        }
+                        updates.remove(player_id);
+                    }
+                }
+            }
+        };
+    }
+
+    private static BukkitRunnable createCheckPlayerLocationTask() {
+        return new BukkitRunnable() {
+            @Override
+            public void run() {
+                // Get claim manager
+                ClaimManager claim_manager = ClaimPlugin.getInstance().getManager();
+
+                // Iterate through all players
+                for (UUID player_id : enabled) {
+                    // Get player and location
+                    Player player = Bukkit.getPlayer(player_id);
+                    Location player_location = player.getLocation();
+
+                    // Check if location is in any claims
+                    for (Claim claim : claim_manager.getClaims()) {
+                        // Check location is inside claim and the world is correct
+                        if (claim.isInside(player_location) && claim.getWorldName().equals(player_location.getWorld().getName())) {
+                            // Render corners of claim
+                            renderClaimCorners(player, claim);
+                        } else {
+                            Bukkit.getScheduler().runTask(ClaimPlugin.getInstance(), new RevertClaimBlocksTask(player_id, claim));
+                        }
+                    }
+                }
+            }
+        };
+    }
+
+    private class RemoveExistingBlockTask implements Runnable {
+        private UUID player_id;
+        private BlockKey block;
+
+        public RemoveExistingBlockTask(UUID player_id, BlockKey block) {
+            this.player_id = player_id;
+            this.block = block;
         }
-    }
 
-    private static Particle getHappyVillagerParticle() {
-        try {
-            return Particle.valueOf("HAPPY_VILLAGER");
-        } catch (IllegalArgumentException e) {
-            try {
-                return Particle.valueOf("VILLAGER_HAPPY");
-            } catch (IllegalArgumentException ex) {
-                return Particle.HEART;
+        @Override
+        public void run() {
+            // Get existing set
+            Set<BlockKey> existing_set = existing.get(this.player_id);
+            if (existing_set == null) {
+                return;
+            }
+
+            // Remove existing block
+            existing_set.remove(this.block);
+            if (existing_set.isEmpty()) {
+                existing.remove(this.player_id);
             }
         }
     }
 
-    private static void render_particle(Player p, Claim c) {
-        Particle part = getParticleForTheme(getTheme(p.getUniqueId()));
-        int halfX = c.getSizeX() / 2, halfZ = c.getSizeZ() / 2;
-        int cx = c.getCenterX(), cz = c.getCenterZ();
-        int minY = c.getCenterY() - c.getSizeY() / 2;
-        int maxY = c.getCenterY() + c.getSizeY() / 2;
+    private static class RevertClaimBlocksTask implements Runnable {
+        private UUID player_id;
+        private Claim claim;
 
-        // 1. Render 4 vertical corner lines (from minY to maxY)
-        int[] xs = {cx - halfX, cx + halfX};
-        int[] zs = {cz - halfZ, cz + halfZ};
-        for (int x : xs) {
-            for (int z : zs) {
-                for (double y = minY; y <= maxY; y += 2.0) {
-                    p.spawnParticle(part, x + 0.5, y + 0.5, z + 0.5, 1, 0, 0, 0, 0);
+        public RevertClaimBlocksTask(UUID player_id, Claim claim) {
+            this.player_id = player_id;
+            this.claim = claim;
+        }
+
+        @Override 
+        public void run() {
+            synchronized (mutex) {
+                // Get existing set
+                Set<BlockKey> existing_set = existing.get(this.player_id);
+                if (existing_set == null) {
+                    return;
+                }
+                
+                // Get player
+                Player player = Bukkit.getPlayer(this.player_id);
+                if (player == null) {
+                    return;
+                }
+                
+                // Send all updates
+                for (BlockKey update : new HashSet<>(existing_set)) {
+                    if (claim.isInside(update.loc())) {
+                        player.sendBlockChange(update.loc(), update.data());
+                        existing_set.remove(update);
+                    }
+                }
+
+                // Clean up pending updates
+                Set<BlockKey> pending = updates.get(player_id);
+                if (pending != null) {
+                    for (BlockKey old_update : new HashSet<>(updates.get(player_id))) {
+                        if (claim.isInside(old_update.loc())) {
+                            updates.get(player_id).remove(old_update);
+                        }
+                    }
                 }
             }
         }
-
-        // 2. Render horizontal grid at player's height (clamped to claim bounds)
-        int playerY = p.getLocation().getBlockY();
-        double targetY = playerY + 0.5;
-        if (targetY < minY) targetY = minY + 0.5;
-        if (targetY > maxY) targetY = maxY - 0.5;
-
-        // Draw boundaries at targetY
-        for (double x = cx - halfX; x <= cx + halfX; x += 1.0) {
-            p.spawnParticle(part, x + 0.5, targetY, cz - halfZ + 0.5, 1, 0, 0, 0, 0);
-            p.spawnParticle(part, x + 0.5, targetY, cz + halfZ + 0.5, 1, 0, 0, 0, 0);
-        }
-        for (double z = cz - halfZ; z <= cz + halfZ; z += 1.0) {
-            p.spawnParticle(part, cx - halfX + 0.5, targetY, z + 0.5, 1, 0, 0, 0, 0);
-            p.spawnParticle(part, cx + halfX + 0.5, targetY, z + 0.5, 1, 0, 0, 0, 0);
-        }
     }
 
-    private static void render_block(Player p, Claim c) {
-        // Get world
-        World world = p.getWorld();
+    private static class RevertAllBlocksTask implements Runnable {
+        private UUID player_id;
 
-        // Get half size and center of claim
-        int halfX = c.getSizeX() / 2;
-        int halfZ = c.getSizeZ() / 2;
-        int cx = c.getCenterX();
-        int cz = c.getCenterZ();
+        public RevertAllBlocksTask(UUID player_id) {
+            this.player_id = player_id;
+        }
 
-        // Calculate corners
-        int[] x_corners = {
-            cx - halfX,
-            cx - halfX, 
-            cx + halfX, 
-            cx + halfX
-        };
-        int[] z_corners = {
-            cz - halfZ,
-            cz + halfZ,
-            cz - halfZ,
-            cz + halfZ
-        };
-
-        // Set air transitions around player to marking block
-        int playerY = p.getLocation().getBlockY();
-        for (int i = 0; i < 4; i++) {
-            // Get air transitions 5 blocks above and below player.
-            List<Integer> transitions = airTransitions(world, x_corners[i], z_corners[i], playerY - 5, playerY + 5);
-            for (int transY : transitions) {
-                // Get block at transition
-                Block block = world.getBlockAt(x_corners[i], transY, z_corners[i]);
-
-                // Get data for caching
-                UUID pID = p.getUniqueId();
-                Location loc = block.getLocation();
-                BlockData data = block.getBlockData();
-                BlockKey new_block = new BlockKey(loc, data);
-
-                // Update hashmap
-                if (shown.containsKey(pID)) {
-                    shown.get(pID).add(new_block);
-                } else {
-                    Set<BlockKey> set = new HashSet<BlockKey>();
-                    set.add(new_block);
-                    shown.put(pID, set);
+        @Override 
+        public void run() {
+            synchronized (mutex) {
+                // Get existing set
+                Set<BlockKey> existing_set = existing.get(this.player_id);
+                if (existing_set == null) {
+                    return;
                 }
-
-                // Send block change to player.
-                p.sendBlockChange(loc, Material.GOLD_BLOCK.createBlockData());
+                
+                // Get player
+                Player player = Bukkit.getPlayer(this.player_id);
+                if (player == null) {
+                    return;
+                }
+                
+                // Send all updates
+                for (BlockKey update : existing_set) {
+                    player.sendBlockChange(update.loc(), update.data());
+                }
+                existing.remove(this.player_id);
+                
+                // Clean up pending updates
+                updates.remove(this.player_id);
             }
         }
     }
 
-    private static List<Integer> airTransitions(World world, int x, int z, int minHeight, int maxHeight) {
+    @EventHandler 
+    private void onBlockInteract(PlayerInteractEvent e) {
+        // Get player and player id
+        Player player = e.getPlayer();
+        UUID player_id = player.getUniqueId();
+
+        // Get block interacted with and create block key
+        Block block = e.getClickedBlock();
+        if (block == null) {
+            return;
+        }
+        BlockKey interacted = new BlockKey(block.getLocation(), block.getBlockData());
+
+        // Get existing blocks for player
+        Set<BlockKey> existing_set = existing.get(player_id);
+        if (existing_set == null) {
+            return;
+        }
+
+        // Check if interacting with a modified block
+        if (existing_set.contains(interacted)) {
+            // Send back original data
+            player.sendBlockChange(interacted.loc(), interacted.data());
+
+            // Start a delayed task to remove block data from existing
+            Bukkit.getScheduler().runTaskLater(ClaimPlugin.getInstance(), new RemoveExistingBlockTask(player_id, interacted), 60L);
+        }
+    }
+
+    private static void renderClaimCorners(Player player, Claim claim) {
+        synchronized (mutex) {
+            // Get world, player location and player id
+            World world = player.getWorld();
+            Location player_location = player.getLocation();
+            UUID player_id = player.getUniqueId();
+
+            // Get updates and existing shown blocks for player
+            Set<BlockKey> update_set = updates.get(player_id);
+            Set<BlockKey> existing_shown = existing.get(player_id);
+
+            // Calculate corner locations
+            int cx = claim.getCenterX();
+            int cz = claim.getCenterZ();
+            int sx = claim.getSizeX();
+            int sz = claim.getSizeZ();
+
+            int[] x_corners = {
+                cx - sx / 2,
+                cx - sx / 2,
+                cx + sx / 2,
+                cx + sx / 2
+            };
+            int[] z_corners = {
+                cz - sz / 2,
+                cz + sz / 2,
+                cz - sz / 2,
+                cz + sz / 2
+            };
+
+            List<BlockKey> new_existing = new ArrayList<>();
+            List<BlockKey> new_updates = new ArrayList<>();
+
+            for (int i = 0; i < 4; i++) {
+                int x = x_corners[i];
+                int z = z_corners[i];
+
+                // Find block-to-air transitions
+                List<Integer> transitions = getAirTransitions(world, x, z, player_location.getBlockY());
+                
+                // Iterate through transitions
+                for (int y : transitions) {
+                    Block block = world.getBlockAt(x, y, z);
+                    if (block == null) {
+                        continue;
+                    }
+                    BlockKey existing_block = new BlockKey(block.getLocation(), block.getBlockData());
+
+                    // Check if already shown
+                    if (existing_shown != null && existing_shown.contains(existing_block)) {
+                        continue;
+                    }
+
+                    BlockKey update = new BlockKey(block.getLocation(), Material.GOLD_BLOCK.createBlockData());
+
+                    new_existing.add(existing_block);
+                    new_updates.add(update);
+                }
+            }
+
+            // Update existing
+            if (existing_shown == null) {
+                existing.put(player_id, new HashSet<>(new_existing));
+            } else {
+                existing_shown.addAll(new_existing);
+            }
+
+            // Update the updates
+            if (update_set == null) {
+                updates.put(player_id, new HashSet<>(new_updates));
+            } else {
+                update_set.addAll(new_updates);
+            }
+        }    
+    }
+
+    private static List<Integer> getAirTransitions(World world, int x, int z, int player_height) {
+        // Get chunk snapshot
         ChunkSnapshot snapshot = world.getChunkAt(x >> 4, z >> 4).getChunkSnapshot();
-        return airTransitions(snapshot, x & 15, z & 15, world.getMinHeight(), maxHeight);
+
+        // Get height bounds
+        int min_height = world.getMinHeight();//Math.max(world.getMinHeight(), player_height - 10);
+        int max_height = world.getMaxHeight();//Math.min(world.getMaxHeight(), player_height + 10);
+
+        return getAirTransitions(snapshot, x & 15, z & 15, min_height, max_height);
     }
 
-    private static List<Integer> airTransitions(ChunkSnapshot snapshot, int lx, int lz, int minHeight, int maxHeight) {
-        List<Integer> result = new ArrayList<>();
-        Material below = snapshot.getBlockType(lx, minHeight, lz);
+    private static List<Integer> getAirTransitions(ChunkSnapshot snapshot, int rx, int rz, int min_height, int max_height) {
+        List<Integer> transitions = new ArrayList<Integer>();
+        Material below = snapshot.getBlockType(rx, min_height, rz);
 
-        for (int y = minHeight; y < maxHeight; y++) {
-            Material here = snapshot.getBlockType(lx, y, lz);
-            if (below.isSolid() && here.isAir()) {
-                result.add(y - 1);
+        for (int i = min_height; i < max_height; i++) {
+            Material above = snapshot.getBlockType(rx, i, rz);
+            if (below.isSolid() && !above.isSolid()) {
+                transitions.add(i - 1);
             }
-            below = here;
+            below = above;
         }
-        return result;
+        return transitions;
     }
-
-    private static void revert(Player p, BlockKey block) {
-        // Send original block data back to player.
-        p.sendBlockChange(block.loc(), block.data());
-    }
-
-    private static void revertAll(Player p) {
-        // Get all original blocks
-        Set<BlockKey> set = shown.get(p.getUniqueId());
-        for (BlockKey b : set) {
-            revert(p, b);
-        }
-    }
-
 }

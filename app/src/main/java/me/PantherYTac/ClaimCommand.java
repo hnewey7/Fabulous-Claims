@@ -114,18 +114,18 @@ public class ClaimCommand implements CommandExecutor, TabCompleter {
                 gui.openRentMenu(p, claimOpt.get(), idx);
                 return true;
             }
-            case "theme": {
-                if (p == null) { plugin.sendPrefixed(sender, "§cOnly players can change particle themes."); return true; }
-                if (!this.plugin.feature("particle_themes", true)) { plugin.sendPrefixed(p, "§cParticle themes are disabled by server config."); return true; }
-                if (args.length < 2) {
-                    plugin.sendPrefixed(p, "§eUsage: /claim theme <DEFAULT|CYAN|ENCHANTMENT|HEART|PORTAL>");
-                    return true;
-                }
-                String themeName = args[1].toUpperCase(Locale.ROOT);
-                Visualization.setTheme(p.getUniqueId(), themeName);
-                plugin.sendPrefixed(p, "§aParticle theme set to: " + themeName);
-                return true;
-            }
+            // case "theme": {
+            //     if (p == null) { plugin.sendPrefixed(sender, "§cOnly players can change particle themes."); return true; }
+            //     if (!this.plugin.feature("particle_themes", true)) { plugin.sendPrefixed(p, "§cParticle themes are disabled by server config."); return true; }
+            //     if (args.length < 2) {
+            //         plugin.sendPrefixed(p, "§eUsage: /claim theme <DEFAULT|CYAN|ENCHANTMENT|HEART|PORTAL>");
+            //         return true;
+            //     }
+            //     String themeName = args[1].toUpperCase(Locale.ROOT);
+            //     Visualization.setTheme(p.getUniqueId(), themeName);
+            //     plugin.sendPrefixed(p, "§aParticle theme set to: " + themeName);
+            //     return true;
+            // }
             case "analytics": {
                 if (p == null) { plugin.sendPrefixed(sender, "§cOnly players can view analytics."); return true; }
                 if (!this.plugin.feature("analytics", true)) { plugin.sendPrefixed(p, "§cAnalytics is disabled by server config."); return true; }

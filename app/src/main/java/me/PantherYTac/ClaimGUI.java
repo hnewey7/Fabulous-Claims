@@ -228,16 +228,16 @@ public class ClaimGUI implements Listener {
             )));
         }
 
-        // Particle Visualization & Themes (Slot 28)
-        if (feature("visualization", true)) {
-            inv.setItem(28, createItem(Material.GLOWSTONE_DUST, "§b§l✨ Visualizer & Themes", List.of(
-                    "§7Current Theme: §f" + Visualization.getTheme(p.getUniqueId()),
-                    "§7Highlights claim borders with",
-                    "§7glowing particles.",
-                    "",
-                    "§e▶ Click to toggle or change theme"
-            )));
-        }
+        // // Particle Visualization & Themes (Slot 28)
+        // if (feature("visualization", true)) {
+        //     inv.setItem(28, createItem(Material.GLOWSTONE_DUST, "§b§l✨ Visualizer & Themes", List.of(
+        //             "§7Current Theme: §f" + Visualization.getTheme(p.getUniqueId()),
+        //             "§7Highlights claim borders with",
+        //             "§7glowing particles.",
+        //             "",
+        //             "§e▶ Click to toggle or change theme"
+        //     )));
+        // }
 
         // Sub-Leasing / Rent Console (Slot 30)
         if (feature("sub_leasing", true)) {
@@ -346,13 +346,13 @@ public class ClaimGUI implements Listener {
         for (int i = 0; i < 9; i++) inv.setItem(i, border);
         for (int i = 18; i < 27; i++) inv.setItem(i, border);
 
-        String currentTheme = Visualization.getTheme(p.getUniqueId());
+        // String currentTheme = Visualization.getTheme(p.getUniqueId());
 
-        inv.setItem(10, createItem(Material.EMERALD, "§a§lDEFAULT (Villager)", List.of(currentTheme.equals("DEFAULT") ? "§a§l[SELECTED]" : "§eClick to select")));
-        inv.setItem(12, createItem(Material.SOUL_TORCH, "§b§lCYAN (Soul Flame)", List.of(currentTheme.equals("CYAN") ? "§a§l[SELECTED]" : "§eClick to select")));
-        inv.setItem(14, createItem(Material.ENCHANTING_TABLE, "§d§lENCHANTMENT (Glyphs)", List.of(currentTheme.equals("ENCHANTMENT") ? "§a§l[SELECTED]" : "§eClick to select")));
-        inv.setItem(15, createItem(Material.POPPY, "§c§lHEART (Hearts)", List.of(currentTheme.equals("HEART") ? "§a§l[SELECTED]" : "§eClick to select")));
-        inv.setItem(16, createItem(Material.OBSIDIAN, "§5§lPORTAL (Purple)", List.of(currentTheme.equals("PORTAL") ? "§a§l[SELECTED]" : "§eClick to select")));
+        // inv.setItem(10, createItem(Material.EMERALD, "§a§lDEFAULT (Villager)", List.of(currentTheme.equals("DEFAULT") ? "§a§l[SELECTED]" : "§eClick to select")));
+        // inv.setItem(12, createItem(Material.SOUL_TORCH, "§b§lCYAN (Soul Flame)", List.of(currentTheme.equals("CYAN") ? "§a§l[SELECTED]" : "§eClick to select")));
+        // inv.setItem(14, createItem(Material.ENCHANTING_TABLE, "§d§lENCHANTMENT (Glyphs)", List.of(currentTheme.equals("ENCHANTMENT") ? "§a§l[SELECTED]" : "§eClick to select")));
+        // inv.setItem(15, createItem(Material.POPPY, "§c§lHEART (Hearts)", List.of(currentTheme.equals("HEART") ? "§a§l[SELECTED]" : "§eClick to select")));
+        // inv.setItem(16, createItem(Material.OBSIDIAN, "§5§lPORTAL (Purple)", List.of(currentTheme.equals("PORTAL") ? "§a§l[SELECTED]" : "§eClick to select")));
 
         // Back button (Slot 22)
         inv.setItem(22, createItem(Material.ARROW, "§e§l« Back to Management", List.of("§7Return to claim #" + index)));
@@ -763,27 +763,27 @@ public class ClaimGUI implements Listener {
             return;
         }
 
-        // Particle Themes Menu
-        if (title.contains("Particle Themes")) {
-            e.setCancelled(true);
-            if (e.getClickedInventory() != e.getView().getTopInventory()) return;
-            ItemStack clicked = e.getCurrentItem();
-            if (clicked == null || clicked.getType() == Material.AIR) return;
+        // // Particle Themes Menu
+        // if (title.contains("Particle Themes")) {
+        //     e.setCancelled(true);
+        //     if (e.getClickedInventory() != e.getView().getTopInventory()) return;
+        //     ItemStack clicked = e.getCurrentItem();
+        //     if (clicked == null || clicked.getType() == Material.AIR) return;
 
-            if (clicked.getType() == Material.ARROW) { p.closeInventory(); return; }
+        //     if (clicked.getType() == Material.ARROW) { p.closeInventory(); return; }
 
-            Material mat = clicked.getType();
-            String chosen = "DEFAULT";
-            if (mat == Material.SOUL_TORCH) chosen = "CYAN";
-            else if (mat == Material.ENCHANTING_TABLE) chosen = "ENCHANTMENT";
-            else if (mat == Material.POPPY) chosen = "HEART";
-            else if (mat == Material.OBSIDIAN) chosen = "PORTAL";
+        //     Material mat = clicked.getType();
+        //     String chosen = "DEFAULT";
+        //     if (mat == Material.SOUL_TORCH) chosen = "CYAN";
+        //     else if (mat == Material.ENCHANTING_TABLE) chosen = "ENCHANTMENT";
+        //     else if (mat == Material.POPPY) chosen = "HEART";
+        //     else if (mat == Material.OBSIDIAN) chosen = "PORTAL";
 
-            Visualization.setTheme(p.getUniqueId(), chosen);
-            plugin.sendPrefixed(p, "§aParticle theme set to: " + chosen);
-            p.closeInventory();
-            return;
-        }
+        //     Visualization.setTheme(p.getUniqueId(), chosen);
+        //     plugin.sendPrefixed(p, "§aParticle theme set to: " + chosen);
+        //     p.closeInventory();
+        //     return;
+        // }
 
         // Analytics Menu
         if (title.contains("Analytics for Claim #")) {
