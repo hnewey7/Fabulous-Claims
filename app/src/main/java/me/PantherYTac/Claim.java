@@ -88,6 +88,7 @@ public class Claim {
 
     // Ownership & Renting helpers
     public boolean isOwner(UUID uuid) { return owners.contains(uuid); }
+    public boolean isTrusted(UUID uuid) { return trusted.contains(uuid); }
 
     public double getBankBalance() { return bankBalance; }
     public void setBankBalance(double balance) { this.bankBalance = Math.max(0.0, balance); }

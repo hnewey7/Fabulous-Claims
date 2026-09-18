@@ -374,6 +374,11 @@ public class ClaimManager {
         if (file.exists()) {
             file.delete();
         }
+
+        // Remove from visualisation
+        for (UUID player_id : Visualization.enabled) {
+            Bukkit.getScheduler().runTask(plugin, new Visualization.RevertClaimBlocksTask(player_id, claim));
+        }
         return true;
     }
 

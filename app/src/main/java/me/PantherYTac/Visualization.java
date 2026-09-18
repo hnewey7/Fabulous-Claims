@@ -20,7 +20,7 @@ import java.util.*;
 public class Visualization implements Listener {
     private record BlockKey(Location loc, BlockData data) {}
 
-    private static Set<UUID> enabled = new HashSet<>();
+    public static Set<UUID> enabled = new HashSet<>();
     private static Map<UUID, Set<BlockKey>> updates = new HashMap<>();
     private static Map<UUID, Set<BlockKey>> existing = new HashMap<>();
 
@@ -207,7 +207,7 @@ public class Visualization implements Listener {
         }
     }
 
-    private static class RevertClaimBlocksTask implements Runnable {
+    public static class RevertClaimBlocksTask implements Runnable {
         private UUID player_id;
         private Claim claim;
 
@@ -293,6 +293,16 @@ public class Visualization implements Listener {
             Location player_location = player.getLocation();
             UUID player_id = player.getUniqueId();
 
+            // Set corner block type
+            BlockData corner_type;
+            if (claim.isOwner(player_id)) {
+                corner_type = Material.GOLD_BLOCK.createBlockData();
+            } else if (claim.isTrusted(player_id)) {
+                corner_type = Material.DIAMOND_BLOCK.createBlockData();
+            } else {
+                corner_type = Material.REDSTONE_BLOCK.createBlockData();
+            }
+
             // Get updates and existing shown blocks for player
             Set<BlockKey> update_set = updates.get(player_id);
             Set<BlockKey> existing_shown = existing.get(player_id);
@@ -339,7 +349,7 @@ public class Visualization implements Listener {
                         continue;
                     }
 
-                    BlockKey update = new BlockKey(block.getLocation(), Material.GOLD_BLOCK.createBlockData());
+                    BlockKey update = new BlockKey(block.getLocation(), corner_type);
 
                     new_existing.add(existing_block);
                     new_updates.add(update);
